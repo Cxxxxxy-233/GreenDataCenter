@@ -1,10 +1,13 @@
 import os
 import json
+import pandas as pd
 from typing import TypedDict, Annotated, List, Optional, Dict, Any
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, FunctionMessage
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 import operator  # 用于 add_messages 列表操作
+from pycaret.time_series import load_model, predict_model
 
 
 # --- 消息累加函数 ---
@@ -33,6 +36,11 @@ class DataCenterState(TypedDict):
     compliance_overall_status: Optional[str]  # 整体合规情况描述，例如 "完全符合规定要求" 或 "存在一项不合规"
     # --- 新增变量结束 ---
 
+    # 新增：用于存储数据中心负载预测结果
+    load_prediction_results: Optional[pd.DataFrame]
+    # 新增：用于存储风光出力预测结果
+    renewable_prediction_results: Optional[pd.DataFrame]
+
     messages: Annotated[List[BaseMessage], add_messages]
     analysis_result: Optional[str]
     green_energy_allocation: Optional[str]
@@ -54,17 +62,53 @@ llm = ChatOpenAI(
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
 
-# 新增：3. 初始化评估模型 (使用 DeepSeek 模型接口或兼容接口)
+# 3. 初始化评估模型 (使用 DeepSeek 模型接口或兼容接口)
 # 请替换为实际可用的 API Key 和 Base URL，注意这里使用了 DASHSCOPE_API_KEY2
 # 确保在运行前设置 DASHSCOPE_API_KEY2 环境变量
 eval_llm = ChatOpenAI(
     model="deepseek-v3.2",
-    api_key=os.getenv("DASHSCOPE_API_KEY2"),
+    api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
 
 
 # --- 节点定义 ---
+
+# 节点: 数据中心负载预测节点
+def load_prediction_node(state: DataCenterState) -> DataCenterState:
+    """加载并运行预训练的数据中心负载预测模型 (load.pkl)"""
+    print("--- 正在调用数据中心负载预测模型 --- ")
+    try:
+        model = load_model('load', verbose=False)
+        predictions = predict_model(model)
+        print("--- ✅ 数据中心负载预测成功 ---")
+        state["load_prediction_results"] = predictions
+        state["messages"].append(AIMessage(content="✅ 负载预测模型调用成功。"))
+    except Exception as e:
+        error_message = f"--- ❌ 数据中心负载预测失败: {e} ---"
+        print(error_message)
+        state["load_prediction_results"] = pd.DataFrame({"error": [error_message]})
+        state["messages"].append(AIMessage(content=error_message))
+    return state
+
+
+# 节点: 风光出力预测节点
+def renewable_prediction_node(state: DataCenterState) -> DataCenterState:
+    """加载并运行预训练的风光出力预测模型 (power.pkl)"""
+    print("--- 正在调用风光出力预测模型 --- ")
+    try:
+        model = load_model('power', verbose=False)
+        predictions = predict_model(model)
+        print("--- ✅ 风光出力预测成功 ---")
+        state["renewable_prediction_results"] = predictions
+        state["messages"].append(AIMessage(content="✅ 风光出力预测模型调用成功。"))
+    except Exception as e:
+        error_message = f"--- ❌ 风光出力预测失败: {e} ---"
+        print(error_message)
+        state["renewable_prediction_results"] = pd.DataFrame({"error": [error_message]})
+        state["messages"].append(AIMessage(content=error_message))
+    return state
+
 
 # 节点 1: 基础数据初步分析
 def perform_initial_analysis(state: DataCenterState) -> DataCenterState:
@@ -241,81 +285,68 @@ def formulate_strategies(state: DataCenterState) -> DataCenterState:
     return state
 
 
-# 节点 4: 基于电力电子视角的深度洞察 (调用LLM)
-def get_llm_insights_power_electronics(state: DataCenterState) -> DataCenterState:
-    """利用LLM对当前的调度方案从电力电子视角提供深度洞察和优化建议"""
-    print("\n[节点 4: 基于电力电子视角的深度洞察]")
+# 节点 4: 基于供需预测的LLM智能调度
+def llm_reasoning_node(state: DataCenterState) -> DataCenterState:
+    """利用LLM根据供需预测，制定核心调度策略"""
+    print("\n[节点 4: 基于供需预测的LLM智能调度]")
 
-    green_ratio = state["predicted_green_energy_ratio"]
-    load_factor = state["current_datacenter_load_factor"]
-    carbon_intensity = state["grid_carbon_intensity"]
-    pue_target = state["target_pue"]
-    current_green_allocation = state["green_energy_allocation"]
-    current_storage_strategy = state["energy_storage_strategy"]
-    current_migration_plan = state["migration_path"]
-    current_kpis = state["calculated_kpis"]
-    compliance_status = state["compliance_overall_status"]
+    if state.get("human_feedback"):
+        print("--- 正在根据人工反馈重新进行智能分析 ---")
+        feedback_prompt = f"\n重要补充：请根据以下用户反馈调整你的建议：'{state['human_feedback']}'"
+    else:
+        feedback_prompt = ""
 
-    prompt = f"""当前数据中心调度方案已制定以下初步策略：
-    - 当前预测绿电占比: {green_ratio * 100:.2f}%
-    - 当前负载率: {load_factor * 100:.2f}%
-    - 电网碳排放强度: {carbon_intensity:.2f} gCO2/kWh
-    - 实际PUE: {current_kpis.get('PUE_actual', 'N/A'):.2f}
-    - 实际可再生能源占比: {current_kpis.get('Renewable_Energy_Ratio_actual', 'N/A') * 100:.2f}%
-    - 整体合规状态: {compliance_status}
+    prompt = ChatPromptTemplate.from_template("""你是一位零碳数据中心首席架构师。根据下面24小时的“负载预测”(需求)和“风光出力预测”(供应)，制定一份简洁的调度方案。
 
-    作为一名资深的电力电子专家，请对已经存在的绿电分配方案、储能调度策略和负载迁移方案提供深度洞察和优化建议。
-    你的建议应该侧重于电力电子技术的应用和优化，例如：
-    - 储能系统的具体运行模式、电池管理系统(BMS)优化、功率转换效率提升建议。
-    - 绿电并网与系统稳定性的电力电子解决方案。
-    - 应对负载波动和绿电波动的技术措施。
-    - 建议如何利用电力电子技术，确保和提升数据中心的整体合规性，例如PUE、绿电占比等。
-    """
+**负载预测 (需求):**
+{load_data}
 
-    messages = [
-        AIMessage(content=f"已参考当前调度方案，开始生成电力电子优化建议。"),
-        HumanMessage(content=prompt)
-    ]
+**风光出力预测 (供应):**
+{renewable_data}
 
-    response = llm.invoke(messages)
+**请简洁回答：**
+1.  **供需关系**: 哪些时段绿电富余，哪些时段存在缺口？
+2.  **采购策略**: 针对缺口，建议购买绿电(PPA)还是绿证(REC)？
+3.  **调度指令**: 明确储能的充/放电策略，以及何时启动电网购电。
+
+**输出要求：**
+直接输出方案，不要添加任何签名或日期。
+{feedback_prompt}
+""")
+
+    chain = prompt | llm
+    load_str = state.get("load_prediction_results", pd.DataFrame()).to_string()
+    renewable_str = state.get("renewable_prediction_results", pd.DataFrame()).to_string()
+
+    response = chain.invoke({
+        "load_data": load_str,
+        "renewable_data": renewable_str,
+        "feedback_prompt": feedback_prompt
+    })
+
     state["llm_insights"] = response.content
-    state["messages"].append(
-        AIMessage(content="✅ 大模型洞察 (电力电子优化视角) 生成成功")
-    )
+    state["messages"].append(AIMessage(content="✅ 大模型分析完成 (首席架构师视角)"))
     return state
 
 
 # 节点 5: 整合并生成最终调度方案
 def integrate_and_finalize_plan(state: DataCenterState) -> DataCenterState:
-    print("\n[节点 5: 整合并生成最终调度方案 (更新)]")
+    print("\n[节点 5: 整合并生成最终调度方案]")
     final_plan = {
-        "analysis_summary": state["analysis_result"],
-        "green_energy_strategy": {
-            "allocation_details": state["green_energy_allocation"],
-            "predicted_ratio": state["predicted_green_energy_ratio"],
-        },
-        "energy_storage_and_migration_strategy": {
-            "storage_plan": state["energy_storage_strategy"],
-            "migration_or_external_resource_plan": state["migration_path"],
-        },
-        # --- 新增：整合计算出的KPIs和合规性状态 ---
-        "calculated_performance_metrics_actual": state.get("calculated_kpis", {}),
-        "compliance_assessment": {
-            "overall_status": state.get("compliance_overall_status", "未评估"),
-            "redlines_met_status": state.get("compliance_redlines", {}),
-        },
-        # --- 新增结束 ---
-        "compliance_and_impact": {
-            "pue_target_consideration": f"PUE目标: {state['target_pue']:.2f}, 实际PUE: {state['calculated_kpis'].get('PUE_actual', 'N/A'):.2f}. 需要持续监控并努力优化.",
-            # 更新PUE考虑
-            "carbon_reduction_focus": "强调最大化绿电使用、高效储能，并确保持续符合碳排放及绿电消纳合规要求."
-        },
-        "expert_advice_from_power_electronics_perspective": state["llm_insights"]
+        "chief_architect_recommendations": state.get("llm_insights", "无建议"),
+        "load_forecast_24h": state.get("load_prediction_results").to_dict('records') if state.get("load_prediction_results") is not None else "N/A",
+        "renewable_energy_forecast_24h": state.get("renewable_prediction_results").to_dict('records') if state.get("renewable_prediction_results") is not None else "N/A",
+        "initial_conditions": {
+            "predicted_green_energy_ratio": state.get("predicted_green_energy_ratio"),
+            "current_datacenter_load_factor": state.get("current_datacenter_load_factor"),
+            "grid_carbon_intensity": state.get("grid_carbon_intensity"),
+            "target_pue": state.get("target_pue"),
+        }
     }
 
     state["final_plan"] = final_plan
     state["messages"].append(
-        AIMessage(content="✅ 完整调度方案生成成功")
+        AIMessage(content="✅ 最终调度方案已整合生成。")
     )
     return state
 
@@ -363,25 +394,32 @@ def evaluate_suggestions_node(state: DataCenterState) -> DataCenterState:
 # 节点 7: 人工审核节点
 def human_review_node(state: DataCenterState) -> DataCenterState:
     print("\n[节点 7: 人工审核]")
-    final_plan_summary = state["final_plan"]
-    evaluation_report = state["evaluation_report"]
+    llm_insights = state.get("llm_insights", "未能获取方案摘要。")
+    load_predictions = state.get("load_prediction_results")
+    renewable_predictions = state.get("renewable_prediction_results")
 
-    print("\n" + "=" * 25 + " 最终调度方案 (摘要) " + "=" * 25)
-    print(f"分析总结: {final_plan_summary['analysis_summary'][:100]}...")
-    print(f"绿电策略: {final_plan_summary['green_energy_strategy']['allocation_details'][:100]}...")
-    print(f"储能策略: {final_plan_summary['energy_storage_and_migration_strategy']['storage_plan'][:100]}...")
-    print(
-        f"迁移策略: {final_plan_summary['energy_storage_and_migration_strategy']['migration_or_external_resource_plan'][:100]}...")
-    print(f"实际PUE: {final_plan_summary['calculated_performance_metrics_actual'].get('PUE_actual', 'N/A'):.2f}")
-    print(f"整体合规状态: {final_plan_summary['compliance_assessment'].get('overall_status', 'N/A')}")
-    print("\n" + "=" * 25 + " 自动评估报告 " + "=" * 25)
-    print(evaluation_report)
+    print("\n" + "=" * 25 + " 请审核以下方案 " + "=" * 25)
+
+    print("\n--- 未来24小时数据中心负载预测 ---")
+    if load_predictions is not None and not load_predictions.empty:
+        print(load_predictions.to_string())
+    else:
+        print("(无负载预测数据)")
+
+    print("\n--- 未来24小时风光出力预测 ---")
+    if renewable_predictions is not None and not renewable_predictions.empty:
+        print(renewable_predictions.to_string())
+    else:
+        print("(无风光出力预测数据)")
+
+    print("\n--- 首席架构师建议摘要 ---")
+    print(llm_insights)
     print("=" * 60)
 
     # 获取用户输入
     print("\n>>> 请审核方案 <<<")
     try:
-        user_input = input("输入 'y' 确认通过并结束，或输入具体修改意见(例如: '增加储能放电比例') 以重新生成: ")
+        user_input = input("输入 'y' 确认通过并结束，或输入具体修改意见以重新生成: ")
     except KeyboardInterrupt:
         print("\n操作被中断，默认批准方案。")
         user_input = 'y'
@@ -404,8 +442,8 @@ def route_human_review(state: DataCenterState) -> str:
         print("人工审核通过，工作流结束。")
         return "end"
     else:
-        print("人工审核未通过，重新进行绿电分配策略制定。")
-        return "allocate_green_energy"  # 返回到绿电分配策略节点，重新开始迭代
+        print("人工审核未通过，返回LLM Reasoning节点重新生成。")
+        return "llm_reasoning" # 返回到LLM节点重新生成
 
 
 # --- 5. 构建图 ---
@@ -414,9 +452,9 @@ def create_scheduling_graph():
 
     # 添加节点
     workflow.add_node("perform_initial_analysis", perform_initial_analysis)
-    workflow.add_node("allocate_green_energy", allocate_green_energy)
-    workflow.add_node("formulate_strategies", formulate_strategies)
-    workflow.add_node("get_llm_insights_power_electronics", get_llm_insights_power_electronics)
+    workflow.add_node("load_prediction", load_prediction_node)
+    workflow.add_node("renewable_prediction", renewable_prediction_node)
+    workflow.add_node("llm_reasoning", llm_reasoning_node)
     workflow.add_node("integrate_and_finalize_plan", integrate_and_finalize_plan)
     workflow.add_node("evaluate_suggestions_node", evaluate_suggestions_node)
     workflow.add_node("human_review_node", human_review_node)
@@ -425,10 +463,10 @@ def create_scheduling_graph():
     workflow.set_entry_point("perform_initial_analysis")
 
     # 定义边
-    workflow.add_edge("perform_initial_analysis", "allocate_green_energy")
-    workflow.add_edge("allocate_green_energy", "formulate_strategies")
-    workflow.add_edge("formulate_strategies", "get_llm_insights_power_electronics")
-    workflow.add_edge("get_llm_insights_power_electronics", "integrate_and_finalize_plan")
+    workflow.add_edge("perform_initial_analysis", "load_prediction")
+    workflow.add_edge("load_prediction", "renewable_prediction")
+    workflow.add_edge("renewable_prediction", "llm_reasoning")
+    workflow.add_edge("llm_reasoning", "integrate_and_finalize_plan")
     workflow.add_edge("integrate_and_finalize_plan", "evaluate_suggestions_node")
     workflow.add_edge("evaluate_suggestions_node", "human_review_node")
 
@@ -437,7 +475,7 @@ def create_scheduling_graph():
         "human_review_node",
         route_human_review,
         {
-            "allocate_green_energy": "allocate_green_energy",  # 如果未通过，回到绿电分配重新开始迭代
+            "llm_reasoning": "llm_reasoning", # 如果未通过，回到LLM Reasoning重新开始迭代
             "end": END  # 如果通过，结束
         }
     )
@@ -448,8 +486,6 @@ def create_scheduling_graph():
 # --- 主执行逻辑 ---
 if __name__ == "__main__":
     # 初始化环境变量 (请在实际运行前设置你的API Key)
-    # os.environ["DASHSCOPE_API_KEY"] = "YOUR_DASHSCOPE_QWEN_API_KEY"
-    # os.environ["DASHSCOPE_API_KEY2"] = "YOUR_DASHSCOPE_DEEPSEEK_API_KEY"
 
     # 初始化工作流
     app = create_scheduling_graph()
@@ -495,68 +531,29 @@ if __name__ == "__main__":
             print(f"  - {key}: {json.dumps(value, ensure_ascii=False, indent=2)}")
     print("=" * 60)
 
-    # 执行工作流
-    # 这里使用stream而不是invoke，可以观察到每一步的状态变化和LLM的输出
-    result = None
-    for s in app.stream(initial_state):
-        if "__end__" in s:
-            result = s["__end__"]
+    # --- 运行工作流并获取最终结果 ---
+    print("\n" + "="*20 + " 开始运行Agent工作流 " + "="*20)
+    # 使用 invoke 获取最终状态，以便生成PDF
+    final_state = app.invoke(initial_state, {"recursion_limit": 100})
+    print("="*20 + " Agent工作流运行结束 " + "="*20 + "\n")
+
+
+    # --- 生成Markdown报告 ---
+    try:
+        from markdown_generator import save_plan_to_markdown
+
+        md_filename = "零碳调度方案.md"
+        print(f"--- 正在生成Markdown报告: {md_filename} ---")
+        
+        # 提取最终方案用于生成Markdown
+        final_plan_data = final_state.get('final_plan')
+        if final_plan_data:
+            save_plan_to_markdown(final_plan_data, md_filename)
+            print(f"--- ✅ Markdown报告已成功保存为 {md_filename} ---")
         else:
-            print(s)
-            print("-" * 60)
+            print("--- ⚠️ 未在最终状态中找到'final_plan'，无法生成Markdown。 ---")
 
-    # 确保result已定义
-    if result is None:
-        print("工作流执行失败，未获取到结果。")
-        exit(1)
-
-    # 输出最终结果概览
-    print("\n" + "=" * 25 + " 最终工作流结果 " + "=" * 25)
-
-    if "final_plan" not in result:
-        print("\n工作流未能成功生成最终方案。")
-    else:
-        print("\n[最终调度方案概览]")
-        final_plan = result["final_plan"]
-
-        # 打印关键摘要信息
-        print("分析总结:")
-        print(final_plan.get("analysis_summary", "N/A"))
-        print("\n绿电策略分配细则:")
-        print(final_plan.get("green_energy_strategy", {}).get("allocation_details", "N/A"))
-        print("\n储能调度策略:")
-        print(final_plan.get("energy_storage_and_migration_strategy", {}).get("storage_plan", "N/A"))
-        print("\n负载迁移/外部资源策略:")
-        print(final_plan.get("energy_storage_and_migration_strategy", {}).get("migration_or_external_resource_plan",
-                                                                              "N/A"))
-
-        print("\n实际计算的KPIs:")
-        print(json.dumps(final_plan.get("calculated_performance_metrics_actual", {}), indent=2, ensure_ascii=False))
-
-        print("\n合规性评估:")
-        print(f"  - 整体状态: {final_plan.get('compliance_assessment', {}).get('overall_status', 'N/A')}")
-        print(
-            f"  - 红线符合情况: {json.dumps(final_plan.get('compliance_assessment', {}).get('redlines_met_status', {}), indent=2, ensure_ascii=False)}")
-
-        print("\n专家LLM建议 (侧重电力电子优化):")
-        print(final_plan.get("expert_advice_from_power_electronics_perspective", "N/A"))
-
-    if result["evaluation_report"]:
-        print("\n自动评估报告:")
-        print(result["evaluation_report"])
-
-    print("\n[关键执行日志]")
-    for msg in result["messages"]:
-        if isinstance(msg, AIMessage):
-            print(f"AIMessage: {msg.content}")
-        elif isinstance(msg, HumanMessage):
-            print(f"HumanMessage: {msg.content}")
-        elif isinstance(msg, FunctionMessage):
-            print(f"FunctionMessage: {msg.content}")
-
-    if result["human_approved"]:
-        print("\n最终方案已通过人工审核。")
-    else:
-        print(f"\n最终方案未通过人工审核。反馈意见: {result.get('human_feedback', '无具体意见')}")
-
-    print("=" * 60)
+    except ImportError:
+        print("--- ❌ 生成Markdown失败: 找不到 markdown_generator.py 文件。请确保它和主脚本在同一目录下。 ---")
+    except Exception as e:
+        print(f"--- ❌ 生成Markdown时发生未知错误: {e} ---")

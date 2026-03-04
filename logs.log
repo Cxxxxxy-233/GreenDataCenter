@@ -15341,3 +15341,27 @@ Setuptools is replacing distutils. Support for replacing an already imported dis
 2026-02-19 19:11:37,250:INFO:load_model(model_name=load, platform=None, authentication=None, verbose=False)
 2026-02-19 19:11:38,607:INFO:Initializing load_model()
 2026-02-19 19:11:38,609:INFO:load_model(model_name=power, platform=None, authentication=None, verbose=False)
+2026-03-03 11:50:12,552:WARNING:
+'prophet' is a soft dependency and not included in the pycaret installation. Please run: `pip install prophet` to install.
+2026-03-03 11:50:48,061:INFO:Initializing load_model()
+2026-03-03 11:50:48,066:INFO:load_model(model_name=load, platform=None, authentication=None, verbose=False)
+2026-03-03 11:50:49,938:INFO:Initializing load_model()
+2026-03-03 11:50:49,938:INFO:load_model(model_name=power, platform=None, authentication=None, verbose=False)
+2026-03-03 12:25:15,106:WARNING:
+'prophet' is a soft dependency and not included in the pycaret installation. Please run: `pip install prophet` to install.
+2026-03-03 12:25:49,753:INFO:Initializing load_model()
+2026-03-03 12:25:49,755:INFO:load_model(model_name=load, platform=None, authentication=None, verbose=False)
+2026-03-03 12:25:51,118:INFO:Initializing load_model()
+2026-03-03 12:25:51,119:INFO:load_model(model_name=power, platform=None, authentication=None, verbose=False)
+2026-03-04 08:37:01,733:WARNING:
+'prophet' is a soft dependency and not included in the pycaret installation. Please run: `pip install prophet` to install.
+2026-03-04 08:37:36,332:INFO:Initializing load_model()
+2026-03-04 08:37:36,332:INFO:load_model(model_name=load, platform=None, authentication=None, verbose=False)
+2026-03-04 08:37:38,651:INFO:Initializing load_model()
+2026-03-04 08:37:38,651:INFO:load_model(model_name=power, platform=None, authentication=None, verbose=False)
+2026-03-04 08:43:25,472:WARNING:
+'prophet' is a soft dependency and not included in the pycaret installation. Please run: `pip install prophet` to install.
+2026-03-04 08:44:01,405:INFO:Initializing load_model()
+2026-03-04 08:44:01,407:INFO:load_model(model_name=load, platform=None, authentication=None, verbose=False)
+2026-03-04 08:44:02,559:INFO:Initializing load_model()
+2026-03-04 08:44:02,559:INFO:load_model(model_name=power, platform=None, authentication=None, verbose=False)

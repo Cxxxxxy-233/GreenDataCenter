@@ -50,7 +50,7 @@ llm = ChatOpenAI(
 # 确保在运行前设置 DASHSCOPE_API_KEY2 环境变量
 eval_llm = ChatOpenAI(
     model="deepseek-v3.2",
-    api_key=os.getenv("DASHSCOPE_API_KEY2"),
+    api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
 
