@@ -10,11 +10,12 @@ from agents.infrastructure_agent import create_infrastructure_agent
 # --- 1. 定义将在所有Agent之间传递的共享状态 ---
 class SystemState(TypedDict):
     """ 定义整个系统的状态 """
-    user_requirements: dict
-    load_profile: Annotated[dict, lambda x, y: {**x, **y}]
-    renewable_potential: Annotated[dict, lambda x, y: {**x, **y}]
-    infrastructure_plan: Annotated[dict, lambda x, y: {**x, **y}]
-    economic_analysis: Annotated[dict, lambda x, y: {**x, **y}]
+    user_requirements: Dict[str, Any]
+    load_profile: Annotated[Dict[str, Any], lambda x, y: {**x, **y}]
+    renewable_potential: Annotated[Dict[str, Any], lambda x, y: {**x, **y}]
+    infrastructure_plan: Annotated[Dict[str, Any], lambda x, y: {**x, **y}]
+    economic_analysis: Annotated[Dict[str, Any], lambda x, y: {**x, **y}]
+    cooling_plan: Annotated[Dict[str, Any], lambda x, y: {**x, **y}]  # 新增独立字段
     final_report: str
 
 # --- 2. 定义各个专家Agent的节点函数 ---
